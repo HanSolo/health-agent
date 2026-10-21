@@ -1,0 +1,767 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Mac Health Agent</title>
+    <style>
+        :root {
+            color-scheme     : light;
+            --page           : #f9f9f7;
+            --surface        : #fcfcfb;
+            --text-primary   : #0b0b0b;
+            --text-secondary : #52514e;
+            --text-muted     : #6b6a65;
+            --grid           : #e1e0d9;
+            --axis           : #c3c2b7;
+            --border         : rgba(11, 11, 11, 0.10);
+            --series-1       : #2a78d6;
+            --series-2       : #eb6834;
+            --on-accent      : #ffffff;
+            /* Status colours are fixed in both modes and always come with an icon and a label. */
+            --good           : #0ca30c;
+            --warning        : #fab219;
+            --critical       : #d03b3b;
+            --focus          : #2a78d6;
+        }
+
+        @media (prefers-color-scheme : dark) {
+            :root:not([data-theme="light"]) {
+                color-scheme     : dark;
+                --page           : #0d0d0d;
+                --surface        : #1a1a19;
+                --text-primary   : #ffffff;
+                --text-secondary : #c3c2b7;
+                --text-muted     : #a3a29a;
+                --grid           : #2c2c2a;
+                --axis           : #383835;
+                --border         : rgba(255, 255, 255, 0.10);
+                --series-1       : #3987e5;
+                --series-2       : #d95926;
+                --on-accent      : #0b0b0b;
+                --focus          : #6da7ec;
+            }
+        }
+
+        :root[data-theme="dark"] {
+            color-scheme     : dark;
+            --page           : #0d0d0d;
+            --surface        : #1a1a19;
+            --text-primary   : #ffffff;
+            --text-secondary : #c3c2b7;
+            --text-muted     : #a3a29a;
+            --grid           : #2c2c2a;
+            --axis           : #383835;
+            --border         : rgba(255, 255, 255, 0.10);
+            --series-1       : #3987e5;
+            --series-2       : #d95926;
+            --on-accent      : #0b0b0b;
+            --focus          : #6da7ec;
+        }
+
+        * { box-sizing : border-box; }
+
+        body {
+            margin     : 0;
+            background : var(--page);
+            color      : var(--text-primary);
+            font       : 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+        }
+
+        .wrap { max-width : 1180px; margin : 0 auto; padding : 20px 16px 48px; }
+
+        header { display : flex; flex-wrap : wrap; align-items : center; gap : 12px 20px; margin-bottom : 20px; }
+
+        h1 { font-size : 20px; margin : 0; font-weight : 650; flex : 1 1 auto; }
+
+        h2 { font-size : 13px; margin : 0 0 12px; font-weight : 600; color : var(--text-secondary); letter-spacing : 0.02em; text-transform : uppercase; }
+
+        .meta { display : flex; flex-wrap : wrap; gap : 6px 18px; color : var(--text-secondary); font-size : 13px; }
+
+        .meta span { display : inline-flex; align-items : center; gap : 6px; }
+
+        .dot { width : 8px; height : 8px; border-radius : 50%; background : var(--text-muted); display : inline-block; }
+
+        .dot.ok { background : var(--good); }
+
+        .dot.bad { background : var(--critical); }
+
+        button {
+            font    : inherit; font-weight : 600; color : var(--text-primary); background : var(--surface);
+            border  : 1px solid var(--axis); border-radius : 8px; padding : 8px 14px; cursor : pointer;
+            display : inline-flex; align-items : center; gap : 8px; min-height : 36px;
+        }
+
+        button:hover:not(:disabled) { border-color : var(--series-1); }
+
+        button:disabled { opacity : 0.6; cursor : default; }
+
+        :focus-visible { outline : 2px solid var(--focus); outline-offset : 2px; }
+
+        .spinner { width : 14px; height : 14px; border-radius : 50%; border : 2px solid var(--axis); border-top-color : var(--series-1); animation : spin 0.8s linear infinite; display : none; }
+
+        .busy .spinner { display : inline-block; }
+
+        @keyframes spin {
+            to { transform : rotate(360deg); }
+        }
+
+        @media (prefers-reduced-motion : reduce) {
+            .spinner { animation-duration : 3s; }
+        }
+
+        .layout { display : grid; grid-template-columns : minmax(0, 1.15fr) minmax(0, 1fr); gap : 16px; align-items : start; }
+
+        @media (max-width : 860px) {
+            .layout { grid-template-columns : minmax(0, 1fr); }
+        }
+
+        .card { background : var(--surface); border : 1px solid var(--border); border-radius : 12px; padding : 16px; }
+
+        /* Only the newest assessment is at full strength; older ones stay readable but recede. */
+        #assessments > .assessment { transition : opacity 0.2s ease; }
+
+        #assessments > .assessment.older { opacity : 0.6; }
+
+        #assessments > .assessment.older:hover, #assessments > .assessment.older:focus-within { opacity : 1; }
+
+        @media (prefers-reduced-motion : reduce) {
+            #assessments > .assessment { transition : none; }
+        }
+
+        .stack { display : grid; gap : 16px; }
+
+        /* Meters: the fill carries the state, the track is a wash of the same colour. */
+        .meter { display : grid; grid-template-columns : 76px minmax(0, 1fr) 56px; gap : 4px 12px; align-items : center; padding : 8px 0; }
+
+        .meter + .meter { border-top : 1px solid var(--grid); }
+
+        .meter .name { font-weight : 600; }
+
+        .track { height : 10px; border-radius : 5px; background : color-mix(in srgb, var(--fill, var(--series-1)) 16%, var(--surface)); overflow : hidden; }
+
+        .fill { height : 100%; width : 0; background : var(--fill, var(--series-1)); border-radius : 0 4px 4px 0; transition : width 0.4s ease; }
+
+        @media (prefers-reduced-motion : reduce) {
+            .fill { transition : none; }
+        }
+
+        .value { text-align : right; font-variant-numeric : tabular-nums; font-weight : 600; }
+
+        .detail { grid-column : 2 / 4; color : var(--text-secondary); font-size : 13px; display : flex; gap : 8px; flex-wrap : wrap; }
+
+        .state { display : none; font-weight : 600; color : var(--text-primary); }
+
+        .state[data-level="warn"], .state[data-level="crit"] { display : inline-flex; align-items : center; gap : 4px; }
+
+        .state i { font-style : normal; width : 16px; height : 16px; border-radius : 50%; display : inline-grid; place-items : center; font-size : 11px; font-weight : 800; color : #0b0b0b; }
+
+        .state[data-level="warn"] i { background : var(--warning); }
+
+        .state[data-level="crit"] i { background : var(--critical); color : #ffffff; }
+
+        .procs { display : grid; grid-template-columns : 1fr 1fr; gap : 16px; }
+
+        @media (max-width : 520px) {
+            .procs { grid-template-columns : 1fr; }
+        }
+
+        table { border-collapse : collapse; width : 100%; font-size : 13px; }
+
+        th { text-align : left; font-weight : 600; color : var(--text-secondary); padding : 4px 0; border-bottom : 1px solid var(--axis); }
+
+        td { padding : 4px 0; border-bottom : 1px solid var(--grid); }
+
+        td.num, th.num { text-align : right; font-variant-numeric : tabular-nums; }
+
+        td.pname { max-width : 0; width : 100%; overflow : hidden; text-overflow : ellipsis; white-space : nowrap; }
+
+        .empty { color : var(--text-muted); font-size : 13px; }
+
+        /* Sparkline */
+        .spark { position : relative; }
+
+        .spark svg { display : block; width : 100%; height : 130px; touch-action : none; }
+
+        .tip { position : absolute; pointer-events : none; background : var(--surface); border : 1px solid var(--axis); border-radius : 8px; padding : 6px 10px; font-size : 12px; box-shadow : 0 2px 8px rgba(0, 0, 0, 0.12); white-space : nowrap; display : none; }
+
+        details { margin-top : 8px; font-size : 13px; color : var(--text-secondary); }
+
+        summary { cursor : pointer; }
+
+        /* Assessments */
+        .assessment { border-top : 1px solid var(--grid); padding : 14px 0; }
+
+        .assessment:first-of-type { border-top : 0; padding-top : 0; }
+
+        .a-head { display : flex; flex-wrap : wrap; align-items : center; gap : 6px 10px; margin-bottom : 6px; }
+
+        .pill { display : inline-flex; align-items : center; gap : 6px; border : 1px solid var(--axis); border-radius : 999px; padding : 2px 10px 2px 4px; font-weight : 650; font-size : 12px; letter-spacing : 0.03em; }
+
+        .pill i { font-style : normal; width : 18px; height : 18px; border-radius : 50%; display : inline-grid; place-items : center; font-size : 11px; font-weight : 800; color : #0b0b0b; }
+
+        .pill[data-sev="LOW"] i { background : var(--good); }
+
+        .pill[data-sev="MEDIUM"] i { background : var(--warning); }
+
+        .pill[data-sev="HIGH"] i { background : var(--critical); color : #ffffff; }
+
+        .a-kind { color : var(--text-secondary); font-size : 13px; }
+
+        .a-time { margin-left : auto; color : var(--text-muted); font-size : 12px; }
+
+        .a-summary { font-weight : 600; margin : 4px 0; }
+
+        dl { margin : 6px 0 0; display : grid; grid-template-columns : auto 1fr; gap : 2px 10px; font-size : 14px; }
+
+        dt { color : var(--text-secondary); }
+
+        dd { margin : 0; }
+
+        .a-foot { margin-top : 8px; color : var(--text-muted); font-size : 12px; }
+
+        .badge { border : 1px dashed var(--text-muted); border-radius : 999px; padding : 1px 10px; font-size : 12px; font-weight : 600; color : var(--text-secondary); }
+
+        /* Proposed action */
+        .proposal { margin-top : 12px; border : 1px solid var(--axis); border-radius : 8px; padding : 10px 12px; display : grid; gap : 6px; }
+
+        .p-head { display : flex; flex-wrap : wrap; align-items : center; gap : 6px 10px; }
+
+        .p-title { font-size : 12px; font-weight : 600; letter-spacing : 0.06em; text-transform : uppercase; color : var(--text-secondary); }
+
+        .p-action { font-weight : 600; }
+
+        .p-note { color : var(--text-secondary); font-size : 13px; }
+
+        .p-result { font-size : 13px; }
+
+        .p-buttons { display : flex; flex-wrap : wrap; gap : 8px; align-items : center; margin-top : 4px; }
+
+        .btn-approve { background : var(--series-1); border-color : var(--series-1); color : var(--on-accent); }
+
+        .btn-approve:hover:not(:disabled) { border-color : var(--text-primary); }
+
+        .pill[data-state="PENDING"] i { background : var(--warning); }
+
+        .pill[data-state="BLOCKED"] i, .pill[data-state="FAILED"] i { background : var(--critical); color : #ffffff; }
+
+        .pill[data-state="EXECUTED"] i { background : var(--good); }
+
+        .pill[data-state="REJECTED"] i { background : var(--axis); }
+
+        /* Investigation trace */
+        .trace > summary { font-weight : 600; }
+
+        .trace ol { list-style : none; margin : 8px 0 0; padding : 0; display : grid; gap : 10px; }
+
+        .t-step { display : grid; grid-template-columns : 64px minmax(0, 1fr) auto; gap : 4px 10px; font-size : 13px; }
+
+        .t-phase { font-size : 11px; font-weight : 600; letter-spacing : 0.06em; text-transform : uppercase; color : var(--text-muted); padding-top : 2px; }
+
+        .t-title { font-weight : 600; }
+
+        .t-detail { color : var(--text-secondary); white-space : pre-wrap; overflow-wrap : anywhere; margin-top : 2px; }
+
+        .t-ms { color : var(--text-muted); font-size : 12px; font-variant-numeric : tabular-nums; }
+
+        .placeholder { color : var(--text-muted); }
+
+        .toast { color : var(--text-secondary); font-size : 13px; min-height : 1.4em; margin : 8px 0 0; }
+    </style>
+</head>
+<body>
+<div class="wrap">
+    <header>
+        <h1>Mac Health Agent</h1>
+        <div class="meta" aria-live="polite">
+            <span><i class="dot" id="macDot"></i><span id="macText">Waiting for the Mac app</span></span>
+            <span class="badge" id="simBadge" hidden>Simulated data</span>
+            <span>Model: <strong id="llm">...</strong></span>
+        </div>
+        <button id="analyze" type="button"><span class="spinner" aria-hidden="true"></span><span id="analyzeLabel">Analyze now</span></button>
+    </header>
+
+    <div class="layout">
+        <div class="stack">
+            <section class="card" aria-label="Live metrics">
+                <h2>Live metrics</h2>
+                <div id="meters"></div>
+            </section>
+
+            <section class="card" aria-label="CPU history">
+                <h2>CPU, last 2 minutes</h2>
+                <div class="spark" id="spark">
+                    <svg id="sparkSvg" role="img" aria-label="Line chart of overall CPU usage over the last two minutes"></svg>
+                    <div class="tip" id="tip"></div>
+                </div>
+                <details id="sparkTable">
+                    <summary>Show as table</summary>
+                    <table>
+                        <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th class="num">CPU %</th>
+                        </tr>
+                        </thead>
+                        <tbody id="sparkRows"></tbody>
+                    </table>
+                </details>
+            </section>
+
+            <section class="card" aria-label="Top processes">
+                <h2>Top processes</h2>
+                <div class="procs">
+                    <div>
+                        <table>
+                            <thead>
+                            <tr>
+                                <th>By CPU</th>
+                                <th class="num">% of a core</th>
+                            </tr>
+                            </thead>
+                            <tbody id="procCpu"></tbody>
+                        </table>
+                    </div>
+                    <div>
+                        <table>
+                            <thead>
+                            <tr>
+                                <th>By memory</th>
+                                <th class="num">Memory</th>
+                            </tr>
+                            </thead>
+                            <tbody id="procMem"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <section class="card" aria-label="Agent assessments">
+            <h2>Agent assessments</h2>
+            <div id="assessments"><p class="placeholder" id="noAssessments">No assessments yet. Click "Analyze now", or wait for a threshold to be crossed.</p></div>
+            <p class="toast" id="toast" role="status"></p>
+        </section>
+    </div>
+</div>
+
+<script>
+  'use strict';
+
+  // ---- helpers -------------------------------------------------------------
+  // Everything that comes from the server, and especially the LLM's text, goes in through
+  // textContent. Nothing is ever assigned to innerHTML.
+  const $ = id => document.getElementById(id);
+
+  function el(tag, cls, text) {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined && text !== null) node.textContent = text;
+    return node;
+  }
+
+  const fmtPct = v => v.toFixed(v < 10 ? 1 : 0) + '%';
+
+  function fmtBytes(b) {
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let i = 0;
+    while (b >= 1024 && i < units.length - 1) {
+      b /= 1024;
+      i++;
+    }
+    return b.toFixed(i >= 3 ? 1 : 0) + ' ' + units[i];
+  }
+
+  const fmtRate = b => fmtBytes(b) + '/s';
+  const fmtTime = iso => new Date(iso).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'});
+
+  // ---- meters --------------------------------------------------------------
+  // rows: id, label, warn/critical thresholds (percent, "high is bad") or inverted for battery.
+  const ROWS = [
+    {id: 'cpu', label: 'CPU', warn: 60, crit: 85},
+    {id: 'memory', label: 'Memory', warn: 60, crit: 85},
+    {id: 'network', label: 'Network', warn: 60, crit: 85},
+    {id: 'disk', label: 'SSD I/O', warn: 60, crit: 85},
+    {id: 'battery', label: 'Battery', warn: 20, crit: 10, low: true, hidden: true},
+  ];
+  const meterEls = {};
+  for (const row of ROWS) {
+    const wrap = el('div', 'meter');
+    wrap.dataset.id = row.id;
+    const name = el('div', 'name', row.label);
+    const track = el('div', 'track');
+    track.setAttribute('role', 'meter');
+    track.setAttribute('aria-label', row.label);
+    track.setAttribute('aria-valuemin', '0');
+    track.setAttribute('aria-valuemax', '100');
+    const fill = el('div', 'fill');
+    track.appendChild(fill);
+    const value = el('div', 'value', '-');
+    const detail = el('div', 'detail');
+    const state = el('span', 'state');
+    const icon = el('i');
+    const stateText = el('span');
+    state.append(icon, stateText);
+    const detailText = el('span');
+    detail.append(state, detailText);
+    wrap.append(name, track, value, detail);
+    if (row.hidden) wrap.hidden = true;
+    $('meters').appendChild(wrap);
+    meterEls[row.id] = {row, wrap, track, fill, value, state, icon, stateText, detailText};
+  }
+
+  function level(row, pct) {
+    if (row.low) return pct <= row.crit ? 'crit' : pct <= row.warn ? 'warn' : 'ok';
+    return pct >= row.crit ? 'crit' : pct >= row.warn ? 'warn' : 'ok';
+  }
+
+  function setMeter(id, pct, detail) {
+    const m = meterEls[id];
+    const lv = level(m.row, pct);
+    m.fill.style.width = Math.max(0, Math.min(100, pct)) + '%';
+    m.fill.style.setProperty('--fill', lv === 'crit' ? 'var(--critical)' : lv === 'warn' ? 'var(--warning)' : 'var(--series-1)');
+    m.track.style.setProperty('--fill', lv === 'crit' ? 'var(--critical)' : lv === 'warn' ? 'var(--warning)' : 'var(--series-1)');
+    m.track.setAttribute('aria-valuenow', Math.round(pct));
+    m.value.textContent = fmtPct(pct);
+    m.state.dataset.level = lv;
+    m.icon.textContent = lv === 'crit' ? '!' : '▲';
+    m.stateText.textContent = lv === 'crit' ? (m.row.low ? 'Critical' : 'Very high') : lv === 'warn' ? (m.row.low ? 'Low' : 'Elevated') : '';
+    m.detailText.textContent = detail;
+  }
+
+  function renderProcs(body, list, memory) {
+    body.replaceChildren();
+    if (!list || !list.length) {
+      const tr = el('tr');
+      const td = el('td', 'empty', 'Not available');
+      td.colSpan = 2;
+      tr.appendChild(td);
+      body.appendChild(tr);
+      return;
+    }
+    for (const p of list) {
+      const tr = el('tr');
+      const name = el('td', 'pname', p.name);
+      name.title = p.name + ' (pid ' + p.pid + ')';
+      tr.append(name, el('td', 'num', memory ? fmtBytes(p.memoryBytes) : p.cpuPercent.toFixed(0) + '%'));
+      body.appendChild(tr);
+    }
+  }
+
+  // ---- CPU sparkline -------------------------------------------------------
+  const HISTORY = 120;
+  const history = [];   // {t: ISO string, v: percent}
+  const svg = $('sparkSvg');
+  const tip = $('tip');
+  const NS = 'http://www.w3.org/2000/svg';
+  let hoverIndex = null;
+
+  function svgEl(name, attrs) {
+    const node = document.createElementNS(NS, name);
+    for (const k in attrs) node.setAttribute(k, attrs[k]);
+    return node;
+  }
+
+  function geometry() {
+    const w = svg.clientWidth || 400, h = svg.clientHeight || 130;
+    const pad = {l: 30, r: 12, t: 8, b: 8};
+    const step = (w - pad.l - pad.r) / (HISTORY - 1);
+    return {
+      w, h, pad,
+      x: i => w - pad.r - (history.length - 1 - i) * step,
+      y: v => pad.t + (1 - v / 100) * (h - pad.t - pad.b),
+    };
+  }
+
+  function drawSpark() {
+    const g = geometry();
+    svg.setAttribute('viewBox', '0 0 ' + g.w + ' ' + g.h);
+    svg.replaceChildren();
+    for (const v of [0, 50, 100]) {
+      svg.appendChild(svgEl('line', {x1: g.pad.l, x2: g.w - g.pad.r, y1: g.y(v), y2: g.y(v), stroke: v === 0 ? 'var(--axis)' : 'var(--grid)', 'stroke-width': 1}));
+      const label = svgEl('text', {x: g.pad.l - 6, y: g.y(v) + 4, 'text-anchor': 'end', 'font-size': 11, fill: 'var(--text-muted)'});
+      label.textContent = v;
+      svg.appendChild(label);
+    }
+    if (history.length < 2) return;
+    const pts = history.map((p, i) => g.x(i).toFixed(1) + ',' + g.y(p.v).toFixed(1));
+    svg.appendChild(svgEl('polygon', {points: g.x(0) + ',' + g.y(0) + ' ' + pts.join(' ') + ' ' + g.x(history.length - 1) + ',' + g.y(0), fill: 'var(--series-1)', 'fill-opacity': 0.1}));
+    svg.appendChild(svgEl('polyline', {points: pts.join(' '), fill: 'none', stroke: 'var(--series-1)', 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round'}));
+    const idx = hoverIndex !== null && hoverIndex < history.length ? hoverIndex : history.length - 1;
+    if (hoverIndex !== null && hoverIndex < history.length) {
+      svg.appendChild(svgEl('line', {x1: g.x(idx), x2: g.x(idx), y1: g.pad.t, y2: g.h - g.pad.b, stroke: 'var(--axis)', 'stroke-width': 1}));
+    }
+    svg.appendChild(svgEl('circle', {cx: g.x(idx), cy: g.y(history[idx].v), r: 4, fill: 'var(--series-1)', stroke: 'var(--surface)', 'stroke-width': 2}));
+  }
+
+  svg.addEventListener('pointermove', ev => {
+    if (history.length < 2) return;
+    const g = geometry();
+    const rect = svg.getBoundingClientRect();
+    const px = ev.clientX - rect.left;
+    let best = 0, bestD = Infinity;
+    for (let i = 0 ; i < history.length ; i++) {
+      const d = Math.abs(g.x(i) - px);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    hoverIndex = best;
+    tip.textContent = fmtTime(history[best].t) + '  ·  CPU ' + history[best].v.toFixed(1) + '%';
+    tip.style.display = 'block';
+    tip.style.left = Math.min(Math.max(g.x(best) - tip.offsetWidth / 2, 0), g.w - tip.offsetWidth) + 'px';
+    tip.style.top = Math.max(g.y(history[best].v) - tip.offsetHeight - 10, 0) + 'px';
+    drawSpark();
+  });
+  svg.addEventListener('pointerleave', () => {
+    hoverIndex = null;
+    tip.style.display = 'none';
+    drawSpark();
+  });
+  new ResizeObserver(drawSpark).observe(svg);
+
+  function renderSparkTable() {
+    if (!$('sparkTable').open) return;
+    const body = $('sparkRows');
+    body.replaceChildren();
+    for (const p of history.slice(-12).reverse()) {
+      const tr = el('tr');
+      tr.append(el('td', null, fmtTime(p.t)), el('td', 'num', p.v.toFixed(1)));
+      body.appendChild(tr);
+    }
+  }
+
+  $('sparkTable').addEventListener('toggle', renderSparkTable);
+
+  // ---- metrics event -------------------------------------------------------
+  let lastMetricAt = 0;
+  let lastSource = null;
+
+  function onMetrics(m) {
+    lastMetricAt = Date.now();
+    lastSource = m.source || null;
+    const cores = m.cpu.cores;
+    setMeter('cpu', m.cpu.percent, cores + ' cores');
+    setMeter('memory', m.memory.percent, fmtBytes(m.memory.usedBytes) + ' of ' + fmtBytes(m.memory.totalBytes));
+    setMeter('network', m.network.percent, '↓ ' + fmtRate(m.network.rxBytesPerSec) + '   ↑ ' + fmtRate(m.network.txBytesPerSec));
+    setMeter('disk', m.disk.percent, 'read ' + fmtRate(m.disk.readBytesPerSec) + '   write ' + fmtRate(m.disk.writeBytesPerSec));
+    const b = m.battery;
+    meterEls.battery.wrap.hidden = !b;
+    if (b) {
+      const parts = [b.onACPower ? (b.charging ? 'Charging' : 'Plugged in') : 'On battery'];
+      if (b.minutesRemaining != null) parts.push(Math.floor(b.minutesRemaining / 60) + ' h ' + (b.minutesRemaining % 60) + ' min');
+      // On AC power a low level is not urgent, so do not colour it as a problem.
+      setMeter('battery', b.onACPower ? 100 : b.percent, parts.join(', '));
+      meterEls.battery.value.textContent = fmtPct(b.percent);
+      meterEls.battery.fill.style.width = Math.max(0, Math.min(100, b.percent)) + '%';
+    }
+    renderProcs($('procCpu'), m.topProcesses && m.topProcesses.cpu, false);
+    renderProcs($('procMem'), m.topProcesses && m.topProcesses.memory, true);
+
+    history.push({t: m.timestamp, v: m.cpu.percent});
+    if (history.length > HISTORY) history.shift();
+    drawSpark();
+    renderSparkTable();
+    updateMac();
+  }
+
+  let macLive = false;
+
+  function updateMac() {
+    macLive = Date.now() - lastMetricAt < 5000;
+    $('macDot').className = 'dot ' + (macLive ? 'ok' : 'bad');
+    const name = lastSource === 'simulator' ? 'Simulator' : 'Mac app';
+    $('simBadge').hidden = lastSource !== 'simulator';
+    $('macText').textContent = lastMetricAt === 0 ? 'Waiting for the Mac app' : macLive ? name + ' live' : name + ' not sending';
+    refreshButton();
+  }
+
+  setInterval(updateMac, 1000);
+
+  // ---- assessments ---------------------------------------------------------
+  const cards = new Map();      // id -> article element
+  const openTraces = new Set(); // ids whose trace the viewer opened, so a re-render keeps it open
+  const ICON = {LOW: '✓', MEDIUM: '!', HIGH: '✕'};
+  const KIND = {CPU_HIGH: 'High CPU', MEMORY_HIGH: 'High memory', BATTERY_LOW: 'Low battery', DISK_FULL: 'Disk nearly full', MANUAL: 'Manual check'};
+  const PHASE = {plan: 'Plan', tool: 'Tool', assess: 'Assess', guardrail: 'Policy'};
+  const STATE = {
+    PENDING: {icon: '!', label: 'Needs your approval'},
+    BLOCKED: {icon: '✕', label: 'Blocked by policy'},
+    EXECUTED: {icon: '✓', label: 'Done'},
+    FAILED: {icon: '✕', label: 'Failed'},
+    REJECTED: {icon: '–', label: 'Rejected'},
+  };
+
+  function describeAction(p) {
+    if (p.action === 'terminate_process') return 'Terminate ' + (p.processName || 'a process') + (p.pid != null ? ' (pid ' + p.pid + ')' : '');
+    if (p.action === 'purge_temp_files') return 'Purge temporary files';
+    return p.action || '';
+  }
+
+  function renderProposal(a) {
+    const p = a.proposal;
+    if (!p || p.status === 'NONE') return null;
+    const box = el('div', 'proposal');
+    const head = el('div', 'p-head');
+    const st = STATE[p.status] || {icon: '?', label: p.status};
+    const pill = el('span', 'pill');
+    pill.dataset.state = p.status;
+    pill.append(el('i', null, st.icon), document.createTextNode(st.label));
+    head.append(el('span', 'p-title', 'Proposed action'), pill);
+    box.append(head, el('div', 'p-action', describeAction(p)));
+    if (p.reason) box.appendChild(el('div', 'p-note', p.reason));
+    if (p.guardrail) box.appendChild(el('div', 'p-note', 'Policy: ' + p.guardrail));
+
+    if (p.status === 'PENDING') {
+      const row = el('div', 'p-buttons');
+      const approve = el('button', 'btn-approve', 'Approve');
+      approve.type = 'button';
+      const reject = el('button', null, 'Reject');
+      reject.type = 'button';
+      const note = el('span', 'p-note');
+      const decide = async verb => {
+        approve.disabled = reject.disabled = true;
+        note.textContent = verb === 'approve' ? 'Sending to the machine...' : 'Saving...';
+        try {
+          const res = await fetch('/api/assessments/' + a.id + '/' + verb, {method: 'POST'});
+          if (res.ok) {
+            onAssessment(await res.json());
+            return;
+          }
+          let msg = 'Request failed (' + res.status + ').';
+          try { msg = (await res.json()).message || msg; } catch (e) { /* keep the default */ }
+          note.textContent = msg;
+        } catch (e) {
+          note.textContent = 'Could not reach the server.';
+          approve.disabled = reject.disabled = false;
+        }
+      };
+      approve.addEventListener('click', () => decide('approve'));
+      reject.addEventListener('click', () => decide('reject'));
+      row.append(approve, reject, note);
+      box.appendChild(row);
+    }
+    if (p.result) box.appendChild(el('div', 'p-result', p.result));
+    if (p.verification) box.appendChild(el('div', 'p-result', p.verification));
+    return box;
+  }
+
+  function renderTrace(a) {
+    if (!a.trace || !a.trace.length) return null;
+    const details = el('details', 'trace');
+    details.open = openTraces.has(a.id);
+    details.addEventListener('toggle', () => { details.open ? openTraces.add(a.id) : openTraces.delete(a.id); });
+    details.appendChild(el('summary', null, 'How the agent got here (' + a.trace.length + ' steps)'));
+    const ol = el('ol');
+    for (const step of a.trace) {
+      const li = el('li', 't-step');
+      const body = el('div');
+      body.append(el('div', 't-title', step.title), el('div', 't-detail', step.detail));
+      li.append(el('span', 't-phase', PHASE[step.phase] || step.phase), body,
+                el('span', 't-ms', step.millis > 0 ? (step.millis >= 1000 ? (step.millis / 1000).toFixed(1) + ' s' : step.millis + ' ms') : ''));
+      ol.appendChild(li);
+    }
+    details.appendChild(ol);
+    return details;
+  }
+
+  function renderAssessment(a) {
+    const card = el('article', 'assessment');
+    card.dataset.id = a.id;
+    const head = el('div', 'a-head');
+    const pill = el('span', 'pill');
+    pill.dataset.sev = a.severity;
+    pill.append(el('i', null, ICON[a.severity] || '?'), document.createTextNode(a.severity));
+    head.append(pill, el('span', 'a-kind', KIND[a.kind] || a.kind), el('span', 'a-time', fmtTime(a.at)));
+    card.append(head, el('div', 'a-summary', a.summary));
+
+    const dl = el('dl');
+    if (a.likelyCause) { dl.append(el('dt', null, 'Likely cause'), el('dd', null, a.likelyCause)); }
+    if (a.recommendation) { dl.append(el('dt', null, 'Recommendation'), el('dd', null, a.recommendation)); }
+    card.appendChild(dl);
+
+    const proposal = renderProposal(a);
+    if (proposal) card.appendChild(proposal);
+    const trace = renderTrace(a);
+    if (trace) card.appendChild(trace);
+
+    const sourceText = a.source === 'llm' ? 'Answered by ' + a.model + ', ' + (a.millis / 1000).toFixed(1) + ' s of model time'
+                                          : a.source === 'rules' ? 'Rule-based fallback (no usable LLM answer, see the server log)'
+                                                                 : 'Analysis failed';
+    card.appendChild(el('div', 'a-foot', sourceText + '  ·  trigger: ' + a.detail));
+    return card;
+  }
+
+  function markOlder(list) {
+    Array.from(list.children).forEach((c, i) => c.classList.toggle('older', i > 0));
+  }
+
+  // The same assessment arrives again whenever its proposal changes, so a known id replaces its card.
+  function onAssessment(a) {
+    const noAssessments = $('noAssessments');
+    if (noAssessments) noAssessments.remove();
+    const card = renderAssessment(a);
+    const list = $('assessments');
+    const existing = cards.get(a.id);
+    if (existing && existing.isConnected) {
+      existing.replaceWith(card);
+    } else {
+      list.insertBefore(card, list.firstChild);
+    }
+    cards.set(a.id, card);
+    markOlder(list);
+    while (list.children.length > 20) {
+      const last = list.lastChild;
+      cards.delete(Number(last.dataset.id));
+      list.removeChild(last);
+    }
+  }
+
+  // ---- status + button -----------------------------------------------------
+  let analyzing = false;
+
+  function refreshButton() {
+    // Without live data the model would be asked to judge stale numbers, so the button stays off.
+    $('analyze').disabled = analyzing || !macLive;
+    $('analyze').classList.toggle('busy', analyzing);
+    $('analyze').title = macLive ? '' : 'Waiting for the Mac app to send metrics';
+    $('analyzeLabel').textContent = analyzing ? 'Analyzing...' : 'Analyze now';
+  }
+
+  function onStatus(s) {
+    analyzing = s.analyzing;
+    $('llm').textContent = s.llm;
+    refreshButton();
+  }
+
+  $('analyze').addEventListener('click', async () => {
+    $('toast').textContent = '';
+    try {
+      const res = await fetch('/api/analyze', {method: 'POST'});
+      if (!res.ok) {
+        let msg = 'Request failed (' + res.status + ').';
+        try { msg = (await res.json()).message || msg; } catch (e) { /* keep the default */ }
+        $('toast').textContent = msg;
+      }
+    } catch (e) {
+      $('toast').textContent = 'Could not reach the server.';
+    }
+  });
+
+  // ---- stream --------------------------------------------------------------
+  const source = new EventSource('/api/stream');
+  const on = (name, handler) => source.addEventListener(name, ev => {
+    try { handler(JSON.parse(ev.data)); } catch (e) { console.error('Bad "' + name + '" event', e); }
+  });
+  on('metrics', onMetrics);
+  on('assessment', onAssessment);
+  on('status', onStatus);
+  source.onerror = () => { $('toast').textContent = 'Connection to the server lost, retrying...'; };
+  source.onopen = () => { $('toast').textContent = ''; };
+
+  drawSpark();
+  updateMac();
+</script>
+</body>
+</html>

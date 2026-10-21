@@ -1,0 +1,46 @@
+[
+  {
+    "id": "protected-system-processes",
+    "title": "System processes",
+    "kinds": ["CPU_HIGH", "MEMORY_HIGH", "DISK_FULL", "BATTERY_LOW", "MANUAL"],
+    "processPattern": "^(launchd|kernel_task|WindowServer|loginwindow|systemd|init)$",
+    "guidance": "Operating system processes. Never terminate them. If one of them is busy, report it and recommend a restart of the Mac.",
+    "allowedActions": []
+  },
+  {
+    "id": "build-tools",
+    "title": "Compilers and build tools",
+    "kinds": ["CPU_HIGH", "MEMORY_HIGH", "BATTERY_LOW", "MANUAL"],
+    "processPattern": "^(xcodebuild|swift-frontend|swiftc|clang|clang\\+\\+|ld|gradle|mvn|cc1|rustc|cargo)$",
+    "guidance": "Compilers and linkers use every core and a lot of memory while a build runs. This is expected and ends by itself. The load is not a problem and nothing should be terminated.",
+    "allowedActions": []
+  },
+  {
+    "id": "runaway-cpu",
+    "title": "Runaway CPU",
+    "kinds": ["CPU_HIGH", "MANUAL"],
+    "guidance": "A single non-system process that has used several cores for more than 30 seconds, and is not a build tool, is usually stuck. Terminating it is acceptable once a person approves.",
+    "allowedActions": ["terminate_process"]
+  },
+  {
+    "id": "memory-leak",
+    "title": "Memory leak",
+    "kinds": ["MEMORY_HIGH", "MANUAL"],
+    "guidance": "A process whose memory keeps growing for minutes is leaking. Terminate that process once a person approves. Do not terminate processes whose memory is steady.",
+    "allowedActions": ["terminate_process"]
+  },
+  {
+    "id": "disk-full",
+    "title": "Disk nearly full",
+    "kinds": ["DISK_FULL", "MANUAL"],
+    "guidance": "First stop the process that is writing at high speed, then purge temporary files. Never delete user documents.",
+    "allowedActions": ["terminate_process", "purge_temp_files"]
+  },
+  {
+    "id": "battery-low",
+    "title": "Low battery",
+    "kinds": ["BATTERY_LOW"],
+    "guidance": "Plugging in the charger is the real fix. Ending a heavy video call or similar load slows the drain. Terminating that process is acceptable once a person approves.",
+    "allowedActions": ["terminate_process"]
+  }
+]
