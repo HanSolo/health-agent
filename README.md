@@ -6,7 +6,7 @@ and lets an agent ask a local Ollama model what is going on. Live page at http:/
 ## Run
 
 1. Start SysWatch.app
-2. `ollama pull gemma3:4b` and make sure Ollama is running (`ollama run gemma3:4b`) (http://localhost:11434).
+2. `ollama pull gemma3:4b` and make sure Ollama is running (`ollama run qwen3:27b`) (http://localhost:11434).
 3. `mvn clean package`
 4. `java -jar payara-micro.jar --nocluster --deploy target/health-agent.war`
 5. Open http://localhost:8080/ and click "Analyze now".
@@ -46,6 +46,7 @@ How it works:
 ## Where things are
 
 - `agent/HealthMonitorAgent`: the workflow (Trigger, Decision, plan, investigate, assess, Decision, propose, Outcome)
+- `agent/Reasoning`: the two model calls with timing, trace and fallback, so the agent shows only the workflow
 - `agent/EvidenceTools`, `agent/Runbook`, `agent/Guardrails`, `src/main/resources/runbook.json`
 - `remediation/RemediationExecutor`: sends the approved command and verifies the effect
 - `alerts/AnomalyDetector`: threshold rules that decide when to fire the trigger event

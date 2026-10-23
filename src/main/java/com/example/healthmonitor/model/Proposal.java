@@ -15,6 +15,15 @@ public record Proposal(ProposalStatus status, String action, Integer pid, String
         return new Proposal(ProposalStatus.NONE, null, null, null, null, null, null, null, null);
     }
 
+    /** One line for the evidence trace. */
+    public String describe() {
+        return switch (status) {
+            case NONE    -> "The agent proposes no action.";
+            case PENDING -> "Proposal accepted for approval: " + action + (processName == null ? "" : " on " + processName) + ". " + guardrail;
+            default      -> "Proposal blocked: " + guardrail;
+        };
+    }
+
     public Proposal with(ProposalStatus newStatus, String newResult, Instant when) {
         return new Proposal(newStatus, action, pid, processName, reason, guardrail, newResult, verification, when);
     }

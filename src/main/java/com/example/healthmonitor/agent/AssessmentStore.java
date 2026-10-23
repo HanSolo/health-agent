@@ -37,8 +37,11 @@ public class AssessmentStore {
     private final Set<Long>              deciding = new HashSet<>();
     private final AtomicLong             ids      = new AtomicLong();
 
-    public void add(final HealthAlert alert, final HealthAssessment a, final Proposal proposal, final List<TraceStep> trace, final String source, final String model, final long millis) {
-        insert(new AssessmentRecord(ids.incrementAndGet(), Instant.now(), alert.kind(), alert.detail(), a.severity(), a.summary(), a.likelyCause(), a.recommendation(), source, model, millis, alert.window(), trace, proposal));
+    public void add(HealthAlert alert, HealthAssessment a, Proposal proposal, List<TraceStep> trace,
+                    String source, String model, long millis) {
+        insert(new AssessmentRecord(ids.incrementAndGet(), Instant.now(), alert.kind(), alert.detail(),
+                a.severity(), a.summary(), a.likelyCause(), a.recommendation(),
+                source, model, millis, alert.window(), trace, proposal));
     }
 
     public void addError(final HealthAlert alert, final String message, final String model, final List<TraceStep> trace) {
